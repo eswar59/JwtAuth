@@ -10,9 +10,15 @@ import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.User;
@@ -23,6 +29,8 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
+import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.provisioning.JdbcUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -34,74 +42,56 @@ import java.util.List;
 import java.util.UUID;
 
 @Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
 public class JwtSecurityConfig {
 
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception{
 
         // authorizing all requests
-//        http.authorizeHttpRequests(
-//                auth -> {
-//                    auth.anyRequest().authenticated();
-//                });
-//
-//        // removing sessions
-//        http.sessionManagement(
-//                session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-//        );
-//
-////        //make login basic as it is api
-//        http.httpBasic();
-//
-//
-        //remove csrf
-        http.csrf( csrf -> csrf.disable() );
-//
-//        //adding frames so that we can use h2 database
-//        http.headers().frameOptions().sameOrigin();
-//
-//        //adding oauth2 resource server to authorize jwts
-//        http.oauth2ResourceServer(OAuth2ResourceServerConfigurer::jwt);
+        http.authorizeHttpRequests(
+                auth ->
+                    auth.requestMatchers("/createUser", "/createToken")
+                            .permitAll()
+                            .requestMatchers(HttpMethod.OPTIONS,"/**")
+                            .permitAll()
+                            .requestMatchers("/admin").hasAuthority("SCOPE_ADMIN")
+                            .requestMatchers("/moderator").hasAnyAuthority("SCOPE_MODERATOR", "SCOPE_ADMIN")
+                            .anyRequest()
+                            .authenticated()
+                );
+
+        // removing sessions
+        http.sessionManagement(
+                session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+        );
+
+
+        http.httpBasic();
+
+        http.csrf().disable();
+
+        http.exceptionHandling(
+                (ex) ->
+                        ex.authenticationEntryPoint(
+                                        new BearerTokenAuthenticationEntryPoint())
+                                .accessDeniedHandler(
+                                        new BearerTokenAccessDeniedHandler()));
+
+        //adding oauth2 resource server to authorize jwts
+        http.oauth2ResourceServer(OAuth2ResourceServerConfigurer::jwt);
 
         return http.build();
     }
-
-
-//    @Bean
-//    public DataSource dataSource(){
-//        return new EmbeddedDatabaseBuilder()
-//                .setType(EmbeddedDatabaseType.H2)
-//                .addScript(JdbcDaoImpl.DEFAULT_USER_SCHEMA_DDL_LOCATION)
-//                .build();
-//    }
-
-    // adding users to be stored in db
-    // here we will take datasource as arguement
-//    @Bean
-//    public UserDetailsService userDetailsService(DataSource dataSource){
-//
-//        var user1 = User.withUsername("eswar")
-//                //.password("{noop}secret")
-//                .password("secret")
-//                .passwordEncoder( str -> passwordEncoder().encode(str))
-//                //      ^                       ^
-//                // Method to create user,    bcrypt encoder defined below as bean
-//                .roles("USER")
-//                .build();
-//
-//        var user2 = User.withUsername("admin")
-//                .password("secret")
-//                .passwordEncoder( str -> passwordEncoder().encode(str))
-//                .roles("ADMIN")
-//                .build();
-//
-//        var jdbcUserDetailsManager = new JdbcUserDetailsManager(dataSource);
-//
-//        jdbcUserDetailsManager.createUser(user1);
-//        jdbcUserDetailsManager.createUser(user2);
-//
-//        return jdbcUserDetailsManager;
-//    }
+    @Bean
+    public AuthenticationManager authenticationManager(
+            UserDetailsService userDetailsService) {
+        var authenticationProvider = new DaoAuthenticationProvider();
+        authenticationProvider.setPasswordEncoder(passwordEncoder());
+        authenticationProvider.setUserDetailsService(userDetailsService);
+        return new ProviderManager(authenticationProvider);
+    }
 
     //encoding password and then storing in the database using bcryptpassword encoder
     @Bean
